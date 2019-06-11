@@ -20,7 +20,7 @@ from subprocess import Popen, PIPE
 
 flickr_api_filename = os.path.join(os.environ['HOME'],'.flickr-api')
 if not os.path.exists(flickr_api_filename):
-    print "You must put your Flickr API key and secret in "+flickr_api_filename
+    print("You must put your Flickr API key and secret in "+flickr_api_filename)
 
 configuration = {}
 for line in open(flickr_api_filename):
@@ -30,26 +30,23 @@ for line in open(flickr_api_filename):
     if m:
         configuration[m.group(1)] = m.group(2)
     if not m:
-        print "Each line of "+flickr_api_filename+" must be either empty"
-        print "or of the form 'key = value'"
+        print("Each line of "+flickr_api_filename+" must be either empty")
+        print("or of the form 'key = value'")
         sys.exit(1)
     continue
 
 if not ('api_key' in configuration and 'api_secret' in configuration):
-    print "Both api_key and api_secret must be defined in "+flickr_api_filename
+    print("Both api_key and api_secret must be defined in "+flickr_api_filename)
 
 def md5sum(filename):
-    return checksum(filename,"md5")
+    import hashlib
+    with open(filename, 'rb') as f:
+        return hashlib.md5(f.read()).hexdigest()
 
 def sha1sum(filename):
-    return checksum(filename,"sha1")
-
-def checksum(filename,type):
-    result = Popen([type+"sum",filename],stdout=PIPE).communicate()[0]
-    m = re.search('^('+checksum_pattern+')',result.strip())
-    if not m:
-        raise Exception, "Output from "+type+"sum was unexpected: "+result
-    return m.group(1)
+    import hashlib
+    with open(filename, 'rb') as f:
+        return hashlib.sha1(f.read()).hexdigest()
 
 checksum_pattern = "[0-9a-f]{32,40}"
 
@@ -70,3 +67,15 @@ def base58(n):
 def short_url(photo_id):
     encoded = base58(int(photo_id,10))
     return "http://flic.kr/p/%s" % (encoded,)
+
+
+def expand_paths(patterns):
+    from pathlib import Path
+    import glob
+    paths = []
+    for pattern in patterns:
+        if os.path.isdir(pattern):
+            paths.extend(Path(pattern).glob('**/*.*'))
+        else:
+            paths.extend(glob.glob(pattern))
+    return paths

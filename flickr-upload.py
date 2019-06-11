@@ -1,6 +1,7 @@
 #!/usr/bin/env python2.5
 
 # Copyright 2009 Mark Longair
+# Copyright 2018 Jakob Malm
 
 #   This program is free software: you can redistribute it and/or modify
 #   it under the terms of the GNU General Public License as published by
@@ -25,83 +26,94 @@ import xml
 import tempfile
 from subprocess import call, Popen, PIPE
 import flickrapi
-from optparse import OptionParser
+from argparse import ArgumentParser
 from common import *
+from flickr_checksum_tags import SqliteDb
+from find_not_uploaded import is_not_uploaded
 
-parser = OptionParser(usage="Usage: %prog [OPTIONS] [FILENAME]")
-parser.add_option('--public', dest='public', default=False, action='store_true',
-                  help='make the image viewable by anyone')
-parser.add_option('--family', dest='family', default=False, action='store_true',
-                  help='make the image viewable by contacts marked as family')
-parser.add_option('--friends', dest='friends', default=False, action='store_true',
-                  help='make the image viewable by contacts marked as friends')
-parser.add_option('-v', '--verbose', dest='verbose', default=False, action='store_true',
-                  help='verbose output')
-parser.add_option('-t', '--title', dest='title',
-                  metavar='TITLE',
-                  help='set the title of the photo')
-parser.add_option('--date-uploaded', dest='date_uploaded',
-                  metavar='DATE',
-                  help='set the date and time when the photo was uploaded')
-parser.add_option('--date-taken', dest='date_taken',
-                  metavar='DATE',
-                  help='set the date and time when the photo was taken')
+parser = ArgumentParser()
+parser.add_argument('paths', nargs='+', metavar='FILENAME', help="file to upload")
+parser.add_argument('--public', dest='public', default=False, action='store_true',
+                    help='make the image viewable by anyone')
+parser.add_argument('--family', dest='family', default=False, action='store_true',
+                    help='make the image viewable by contacts marked as family')
+parser.add_argument('--friends', dest='friends', default=False, action='store_true',
+                    help='make the image viewable by contacts marked as friends')
+parser.add_argument('-v', '--verbose', dest='verbose', default=False, action='store_true',
+                    help='verbose output')
+parser.add_argument('-t', '--title', dest='title',
+                    metavar='TITLE',
+                    help='set the title of the photo')
+parser.add_argument('--date-uploaded', dest='date_uploaded',
+                    metavar='DATE',
+                    help='set the date and time when the photo was uploaded')
+parser.add_argument('--date-taken', dest='date_taken',
+                    metavar='DATE',
+                    help='set the date and time when the photo was taken')
+parser.add_argument('--reupload', action='store_true',
+                    help="Don't check if already uploaded.")
 
-options,args = parser.parse_args()
+args = parser.parse_args()
+paths = expand_paths(args.paths)
 
-date_pattern = '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+date_pattern = r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
 date_error_message = 'must be of the form "YYYY-MM-DD HH:MM:SS'
 
-if options.date_uploaded and not re.search(date_pattern,options.date_uploaded):
-    print "The --date-uploaded argument must be "+date_error_message
+if args.date_uploaded and not re.search(date_pattern,args.date_uploaded):
+    print("The --date-uploaded argument must be "+date_error_message)
 
-if options.date_taken and not re.search(date_pattern,options.date_taken):
-    print "The --date-taken argument must be "+date_error_message
-
-if not 1 == len(args):
-    print "No filename to upload supplied:"
-    parser.print_help()
-    sys.exit(1)
+if args.date_taken and not re.search(date_pattern,args.date_taken):
+    print("The --date-taken argument must be "+date_error_message)
 
 flickr = flickrapi.FlickrAPI(configuration['api_key'],configuration['api_secret'])
-
-(token, frob) = flickr.get_token_part_one(perms='write')
-if not token:
-    raw_input("Press 'Enter' after you have authorized this program")
-flickr.get_token_part_two((token, frob))
+flickr.authenticate_via_browser(perms='write')
 
 def progress(percent,done):
-    if done and options.verbose:
-        print "Finished."
-    elif options.verbose:
-        print ""+str(int(round(percent)))+"%"
+    if done and args.verbose:
+        print("Finished.")
+    elif args.verbose:
+        print(""+str(int(round(percent)))+"%")
 
-real_sha1 = sha1sum(args[0])
-real_md5 = md5sum(args[0])
+db_filename = os.path.join(os.environ['HOME'],'.flickr-photos-checksummed.db')
+db = SqliteDb(db_filename)
 
-tags = sha1_machine_tag_prefix + real_sha1 + " " + md5_machine_tag_prefix + real_md5
+for path in paths:
+    if args.reupload or is_not_uploaded(path, db, flickr):
+        pass  # Continue with the upload.
+    else:
+        if args.verbose:
+            print("Skipping {0} -- already uploaded".format(path))
+        continue
 
-result = flickr.upload(filename=args[0],
-                       callback=progress,
-                       title=(options.title or os.path.basename(args[0])),
-                       tags=tags,
-                       is_public=int(options.public),
-                       is_family=int(options.family),
-                       is_friend=int(options.friends))
+    real_sha1 = sha1sum(path)
+    real_md5 = md5sum(path)
 
-photo_id = result.getchildren()[0].text
-if options.verbose:
-    print "photo_id of uploaded photo: "+str(photo_id)
-    print "Uploaded to: "+short_url(photo_id)
+    tags = sha1_machine_tag_prefix + real_sha1 + " " + md5_machine_tag_prefix + real_md5
 
-if options.date_uploaded or options.date_taken:
-    if options.verbose:
-        print "Setting dates:"
-        if options.date_uploaded:
-            print "  Date uploaded: "+options.date_uploaded
-        if options.date_taken:
-            print "  Date taken: "+options.date_taken
-    result = flickr.photos_setDates(photo_id=photo_id,
-                                    date_posted=options.date_uploaded,
-                                    date_taken=options.date_taken,
-                                    date_taken_granularity=0)
+    print("Uploading {0}".format(path))
+    result = flickr.upload(filename=path,
+                        callback=progress,
+                        title=(args.title or os.path.basename(path)),
+                        tags=tags,
+                        is_public=int(args.public),
+                        is_family=int(args.family),
+                        is_friend=int(args.friends))
+
+    photo_id = result.getchildren()[0].text
+    if args.verbose:
+        print("photo_id of uploaded photo: "+str(photo_id))
+        print("Uploaded to: "+short_url(photo_id))
+    
+    db.add_to_done(photo_id, real_md5, real_sha1)
+
+    if args.date_uploaded or args.date_taken:
+        if args.verbose:
+            print("Setting dates:")
+            if args.date_uploaded:
+                print("  Date uploaded: "+args.date_uploaded)
+            if args.date_taken:
+                print("  Date taken: "+args.date_taken)
+        result = flickr.photos_setDates(photo_id=photo_id,
+                                        date_posted=args.date_uploaded,
+                                        date_taken=args.date_taken,
+                                        date_taken_granularity=0)

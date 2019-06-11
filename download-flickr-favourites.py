@@ -28,7 +28,7 @@ from subprocess import call, Popen, PIPE
 import flickrapi
 from optparse import OptionParser
 from common import *
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 import contextlib
 
 parser = OptionParser(usage="Usage: %prog [OPTIONS] <FLICKR-USERNAME>")
@@ -42,7 +42,7 @@ flickr = flickrapi.FlickrAPI(configuration['api_key'],configuration['api_secret'
 
 (token, frob) = flickr.get_token_part_one(perms='write')
 if not token:
-    raw_input("Press 'Enter' after you have authorized this program")
+    input("Press 'Enter' after you have authorized this program")
 flickr.get_token_part_two((token, frob))
 
 # Return the Flickr NSID for a username or alias:
@@ -61,7 +61,7 @@ def get_nsid(username_or_alias):
             username = flickr.urls_lookupUser(url="http://www.flickr.com/people/"+username_or_alias)
             user_id = username.getchildren()[0].getchildren()[0].text
             user = flickr.people_findByUsername(username=user_id)
-        except flickrapi.exceptions.FlickrError, e:
+        except flickrapi.exceptions.FlickrError as e:
             return None
     return user.getchildren()[0].attrib['nsid']
 
@@ -77,14 +77,14 @@ def info_to_url(info_result,size=""):
     elif size == "o":
         return (a['originalformat'], 'http://farm%s.static.flickr.com/%s/%s_%s_o.%s' %  (a['farm'], a['server'], a['id'], a['originalsecret'], a['originalformat']))
     else:
-        raise Exception, "Unknown size ("+size+") passed to info_to_url()"
+        raise Exception("Unknown size ("+size+") passed to info_to_url()")
 
 nsid = get_nsid(args[0])
 if not nsid:
-    print "Couldn't find the username or alias '"+args[0]
+    print("Couldn't find the username or alias '"+args[0])
     sys.exit(1)
 
-print "Got nsid: %s for '%s'" % ( nsid, args[0] )
+print("Got nsid: %s for '%s'" % ( nsid, args[0] ))
 
 per_page = 100
 page = 1
@@ -97,18 +97,18 @@ while True:
     for photo in photo_elements:
         title = photo.attrib['title']
         photo_id = photo.attrib['id']
-        print "Title:", title
+        print("Title:", title)
         info_result = flickr.photos_getInfo(photo_id=photo_id)
         if original_available(info_result):
             size = 'o'
         else:
             size = 'b'
         photo_format, farm_url = info_to_url(info_result, size)
-        print "  Farm URL:", farm_url
+        print("  Farm URL:", farm_url)
         safe_title = re.sub('[ /]', '_', title)
         filename = "%s-%s-%s.%s" % (size, photo_id, safe_title, photo_format)
         if not os.path.exists(filename):
-            with contextlib.closing(urllib2.urlopen(farm_url)) as ifp:
+            with contextlib.closing(urllib.request.urlopen(farm_url)) as ifp:
                 with open(filename, "w") as ofp:
                     ofp.write(ifp.read())
 
